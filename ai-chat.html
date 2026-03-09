@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser AI Chatbot - No API Needed</title>
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        
+        // Allow local models (required for browser)
+        env.allowLocalModels = false;
+        env.useBrowserCache = true;
+        
+        let generator = null;
+        let isGenerating = false;
+        const chatHistory = [];
+        
+        // UI Elements
+        const messagesContainer = document.getElementById('messages');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const loadingDiv = document.getElementById('loading');
+        const statusText = document.getElementById('status');
+        
+        // Load AI Model
+        async function loadModel() {
+            try {
+                statusText.innerText = "🧠 AI ko training de raha hoon... (Pehli baar ~150MB download hoga)";
+                statusText.style.background = "#fff3cd";
+                
+                // Load TinyLlama model - small but capable for chat
+                generator = await pipeline(
+                    'text-generation', 
+                    'Xenova/tinyllama-chat-v1.0',
+                    {
+                        dtype: 'q4f32', // Quantized for faster loading
+                        device: 'webgpu' // Use GPU if available
+                    }
+                );
+                
+                statusText.innerText = "✅ AI taiyaar hai! Ab aap baat kar sakte hain.";
+                statusText.style.background = "#d4edda";
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.placeholder = "Yahan likho... jaise: 'Namaste', 'Mujhe coding sikhao', 'Ek joke sunao'";
+                
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "❌ Error: " + error.message + " (Page refresh karein)";
+                statusText.style.background = "#f8d7da";
+            }
+        }
+        
+        // Format chat history for the model
+        function formatChatHistory() {
+            let prompt = "";
+            chatHistory.forEach(msg => {
+                if (msg.role === 'user') {
+                    prompt += `<|user|>\n${msg.content}</s>\n`;
+                } else {
+                    prompt += `<|assistant|>\n${msg.content}</s>\n`;
+                }
+            });
+            prompt += "<|assistant|>\n";
+            return prompt;
+        }
+        
+        // Add message to UI
+        function addMessage(text, isUser = false) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+            msgDiv.style.cssText = `
+                max-width: 80%;
+                padding: 12px 16px;
+                margin: 8px 0;
+                border-radius: 18px;
+                line-height: 1.4;
+                word-wrap: break-word;
+                ${isUser ? 
+                    'background: #007bff; color: white; margin-left: auto; border-bottom-right-radius: 4px;' : 
+                    'background: #e9ecef; color: black; margin-right: auto; border-bottom-left-radius: 4px;'}
+            `;
+            msgDiv.innerText = text;
+            messagesContainer.appendChild(msgDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // Show loading indicator
+        function showLoading() {
+            loadingDiv.style.display = 'block';
+            loadingDiv.innerHTML = '🤔 Soch raha hoon...';
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function hideLoading() {
+            loadingDiv.style.display = 'none';
+        }
+        
+        // Generate response
+        async function generateResponse() {
+            const userText = userInput.value.trim();
+            if (!userText || isGenerating) return;
+            
+            // Add user message
+            addMessage(userText, true);
+            chatHistory.push({role: 'user', content: userText});
+            userInput.value = '';
+            
+            // Show loading
+            isGenerating = true;
+            sendBtn.disabled = true;
+            showLoading();
+            
+            try {
+                // Prepare prompt with history
+                const prompt = formatChatHistory();
+                
+                // Generate
+                const output = await generator(prompt, {
+                    max_new_tokens: 150,
+                    temperature: 0.7,
+                    top_p: 0.9,
+                    repetition_penalty: 1.1,
+                    do_sample: true,
+                    return_full_text: false
+                });
+                
+                // Extract response (clean up the output)
+                let botResponse = output[0].generated_text;
+                
+                // Clean up any remaining tags
+                botResponse = botResponse.replace(/<\|.*?\|>/g, '').replace(/<\/s>/g, '').trim();
+                
+                // If empty response, give a fallback
+                if (!botResponse) {
+                    botResponse = "Maaf kijiye, mujhe samajh nahi aaya. Kripya dobara puchein.";
+                }
+                
+                // Add bot message
+                addMessage(botResponse, false);
+                chatHistory.push({role: 'assistant', content: botResponse});
+                
+            } catch (error) {
+                console.error(error);
+                addMessage("❌ Error: Kuch gadbad ho gayi. Dobara try karein.", false);
+            } finally {
+                hideLoading();
+                isGenerating = false;
+                sendBtn.disabled = false;
+                userInput.focus();
+            }
+        }
+        
+        // Event listeners
+        sendBtn.addEventListener('click', generateResponse);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                generateResponse();
+            }
+        });
+        
+        // Start loading model when page loads
+        window.addEventListener('load', loadModel);
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 3px solid #3498db;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        #status {
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #loading {
+            display: none;
+            padding: 10px;
+            background: #fff3cd;
+            border-radius: 10px;
+            margin: 10px auto;
+            font-style: italic;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
+        }
+        
+        #userInput {
+            flex: 1;
+            padding: 12px 20px;
+            border: 2px solid #dee2e6;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        #userInput:focus {
+            border-color: #007bff;
+        }
+        
+        #sendBtn {
+            padding: 12px 30px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        #sendBtn:hover:not(:disabled) {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,123,255,0.3);
+        }
+        
+        #sendBtn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .info-box {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 10px;
+            margin: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            text-align: center;
+        }
+        
+        /* Scrollbar styling */
+        .messages-area::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .messages-area::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .messages-area::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        .messages-area::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        @media (max-width: 600px) {
+            .chat-container {
+                height: 100vh;
+                border-radius: 0;
+            }
+            body {
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <h1>🤖 Browser AI Chatbot</h1>
+            <p>100% Free | No API Key | Runs on Your Computer</p>
+        </div>
+        
+        <div id="status">⏳ AI initialize ho raha hai...</div>
+        
+        <div class="info-box">
+            💡 <strong>Tip:</strong> Ye AI aapke browser mein chal raha hai. Koi data server pe nahi ja raha. 
+            Pehli baar thoda time lag sakta hai model download hone mein.
+        </div>
+        
+        <div class="messages-area" id="messages">
+            <div style="text-align: center; color: #6c757d; margin-top: 20px; font-style: italic;">
+                👋 Namaste! Main aapka AI dost hoon.<br>
+                Neeche likhkar mujhse kuch bhi pooch sakte hain!
+            </div>
+        </div>
+        
+        <div id="loading"></div>
+        
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="userInput" 
+                placeholder="AI load ho raha hai..." 
+                disabled 
+                autocomplete="off"
+            >
+            <button id="sendBtn" disabled>Send ➤</button>
+        </div>
+    </div>
+</body>
+</html>
